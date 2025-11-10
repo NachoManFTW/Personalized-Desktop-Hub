@@ -18,8 +18,6 @@ project "DesktopHub"
 	files {
 	"src/**.h", 
 	"src/**.cpp",
-	--"src/Modules/**.h",
-	--"src/Modules/**.cpp",
 
 	--ImGui 
 	"ThirdParty/imgui/*.cpp",
