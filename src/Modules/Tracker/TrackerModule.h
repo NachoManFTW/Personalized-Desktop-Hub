@@ -13,30 +13,39 @@
 class TrackerModule : public IModule
 {
 private:
-	ImGuiWindowFlags m_Flags = ImGuiWindowFlags_None;
+	ImGuiWindowFlags m_Flags = ImGuiWindowFlags_None | ImGuiWindowFlags_MenuBar;
 
 	//Windows api calls
-	HWND m_ForegroundWindow;
-	HWND m_PreviousWindow;
+	HWND m_ForegroundWindow = nullptr;
+	HWND m_PreviousWindow = nullptr;
 	DWORD m_ProcessId;
-	HANDLE m_ProcessHandle;
+	HANDLE m_ProcessHandle = nullptr;
 
-	//Tracking state
-	bool m_ToggleTracking;
-	bool m_IsVisible;
-	std::atomic<bool> m_IsRunning;
-	std::atomic<bool> m_IsSaved;
+	//Tracker state
+	std::atomic<bool> m_IsRunning = false;
+	std::atomic<bool> m_IsSaving = false;
+	bool m_ToggleTracking = false;
+	bool m_IsVisible = false;
 
-	//Current app track
+
+	//Current session tracking
 	std::string m_AppKey;
 	std::string m_CurrentApplication;
 	std::chrono::high_resolution_clock::time_point m_StartTime;
-	long m_TotalDuration;
+	long m_TotalDuration = 0;
+
+	//Storage containers
+	std::map<std::string, long> m_ApplicationTotals;
+	std::map<std::string, long> m_SessionDurations;
+
 
 	//Logging
 	std::string m_LogPath;
 	std::mutex m_TrackerMutex;
-	std::map<std::string, long> m_ApplicationList;
+	std::thread m_WorkerThread;
+
+	//Styling
+	ImGuiStyle style;
 
 public:
 
@@ -52,26 +61,39 @@ public:
 
 	const char* GetName() const override;
 
-	//Getters for current active executable data
+private:
+	//Process helpers
 	DWORD GetProcessId() const;
 	HANDLE GetProcessHandle();
 	std::string GetProcessPath() const;
 	std::string GetExecutableName() const;
 
 
-	//Get current active window information and reset windows
+	//Window helpers
 	void Refresh();
 	void SynchronizeWindows(HWND currentWindow);
 	std::string GetWindowTitle() const;
 
-	//Time related functions
+	//Time
 	std::string Clock();
 	void ResetTimer();
 	long GetWindowDuration();
+	long GetTotalDailyTime();
 
-	//Saving functions
+	//Logging
+	void LoadFromJson();
 	void SaveToJson();
 	void PeriodicSaver();
-	void WindowChanges();
+
+	//Threads
+	void StartWorkerThread();
+
+	//Helpers
+	std::string FormatTime(long seconds);
+	std::vector<std::pair<std::string, long>> ConvertMapToVector();
+
+	//Render Helpers
+	void RenderTableToScreen();
+	void RenderMenuBar();
 };
 

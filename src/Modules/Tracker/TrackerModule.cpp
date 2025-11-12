@@ -4,80 +4,75 @@
 #include <filesystem>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 
+//--------------------
+// Constructor / Destructor
+//--------------------
 TrackerModule::TrackerModule()
 {
 	this->m_ForegroundWindow = GetForegroundWindow();
-	this->m_PreviousWindow = nullptr;
-
-	this->m_ProcessId = GetProcessId();
-	this->m_ProcessHandle = GetProcessHandle();
-
-	this->m_TotalDuration = 0;
-	this->m_AppKey = GetProcessPath();
-	this->m_IsRunning = false;
-	this->m_IsSaved = false;
-
-	this->m_ApplicationList = {};
+	m_ProcessId = GetProcessId();
+	m_ProcessHandle = GetProcessHandle();
+	m_StartTime = std::chrono::high_resolution_clock::now();
 }
 
 TrackerModule::~TrackerModule()
 {
-	
+
 }
 
-//, ran once
+
+//--------------------
+// Lifecycle
+//--------------------
 void TrackerModule::Init()
 {
-	WindowChanges();
+	LoadFromJson();
+	StartWorkerThread();
 	//PeriodicSaver();
-
 }
 
-//, ran every frame
 void TrackerModule::Update(float dt)
 {
-
 }
 
-//Draw to screen, ran every frame 
 void TrackerModule::Render()
 {
-
 	ImGui::Begin("Tracker", nullptr, m_Flags);
-	{
-		ImGui::Text(("Current Application: " + m_CurrentApplication).c_str());
-	}
+
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.0f, 10.0f));
+	ImGui::Text(("Current Application: " + m_CurrentApplication).c_str());
+	RenderMenuBar();
+	RenderTableToScreen();
+
+	ImGui::PopStyleVar();
 	ImGui::End();
 }
 
-//Clear resources allocated to object, ran once
 void TrackerModule::Shutdown()
 {
 	SaveToJson();
 	m_IsRunning = false;
-	if (m_ProcessHandle)
-		CloseHandle(m_ProcessHandle);
+	//if (m_ProcessHandle)
+		//CloseHandle(m_ProcessHandle);
 }
 
-//Return the module name
 const char* TrackerModule::GetName() const
 {
 	return "Tracker";
 }
 
 
-//***************************
-//Current executable data 
-//***************************
-//Return the handle to the current process(active window)
+//--------------------
+// Process helpers
+//--------------------
 HANDLE TrackerModule::GetProcessHandle()
 {
 	return OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, m_ProcessId);
 }
 
-//Get the process id for the current active window
 DWORD TrackerModule::GetProcessId() const
 {
 	DWORD pid = 0;
@@ -85,7 +80,6 @@ DWORD TrackerModule::GetProcessId() const
 	return pid;
 }
 
-//Return the path to the current active window
 std::string TrackerModule::GetProcessPath() const
 {
 	char buffer[MAX_PATH];
@@ -95,8 +89,6 @@ std::string TrackerModule::GetProcessPath() const
 	return "Unknown";
 }
 
-//Return the current executable name
-//If it can't return the path to the current executable
 std::string TrackerModule::GetExecutableName() const
 {
 	std::string path = GetProcessPath();
@@ -104,12 +96,9 @@ std::string TrackerModule::GetExecutableName() const
 	return (pos != std::string::npos) ? path.substr(pos + 1) : path;
 }
 
-
-//***************************
-//Current Window data 
-//***************************
-//Get the current foreground window and that windows process id
-//If it has a process id, close that handle and create a new handle
+//--------------------
+// Window tracking
+//--------------------
 void TrackerModule::Refresh()
 {
 	m_ForegroundWindow = GetForegroundWindow();
@@ -120,8 +109,6 @@ void TrackerModule::Refresh()
 	m_ProcessHandle = GetProcessHandle();
 }
 
-//Set previous window to current active window
-//Get current active window's executable name
 void TrackerModule::SynchronizeWindows(HWND currentWindow)
 {
 	m_PreviousWindow = currentWindow;
@@ -136,131 +123,13 @@ std::string TrackerModule::GetWindowTitle() const
 }
 
 
-//***************************
-//Saving 
-//***************************
-//Logs to a json file via nlohmann library 
-void TrackerModule::SaveToJson()
-{
-	//Get path to solution directory
-	std::filesystem::path solutionRoot = std::filesystem::current_path();
-	std::string fileName = "usage_" + Clock() + ".json";
-	std::cout << solutionRoot << std::endl;
-
-	//Path to logs folder
-	std::filesystem::path logPath = solutionRoot / "Logs" / (fileName);
-	this->m_LogPath = logPath.string();
-	nlohmann::json jsonLogFile;
-
-
-	//Create logs directory if none exists
-	if (!std::filesystem::exists((solutionRoot / "Logs")))
-		std::filesystem::create_directory(solutionRoot / "Logs");
-
-
-	//Load existing file if exists
-	if (std::filesystem::exists(logPath))
-	{
-		std::ifstream inFile(logPath);
-		try
-		{
-			inFile >> jsonLogFile;
-		}
-		catch (const nlohmann::json::parse_error& e)
-		{
-			std::cerr << "JSON PARSE ERROR:" << e.what() << std::endl;
-			jsonLogFile = nlohmann::json::object();
-		}
-		inFile.close();
-	}
-	else //Create one if it log file doesn't exist
-	{
-		std::ofstream outFile(logPath);
-		outFile << jsonLogFile;
-		outFile.close();
-	}
-	
-	//Loop through objects in json file, if they exists, update total duration
-	//if they dont exists, create a new entry
-	for (const auto& [m_AppKey, m_Duration] : m_ApplicationList)
-	{
-		if (jsonLogFile.contains(m_AppKey))
-			jsonLogFile[m_AppKey]["Total Duration"] = jsonLogFile[m_AppKey]["Total Duration"].get<long>() + m_Duration;
-		else
-			jsonLogFile[m_AppKey] = { {"Application", m_AppKey }, { "Total Duration", m_Duration }};
-	}
-
-
-	//Dump to output file, then clear the current json file, and close the output file
-	std::ofstream outFile(logPath);
-	m_ApplicationList.clear();
-	outFile << jsonLogFile.dump(4);
-	jsonLogFile.clear();
-	outFile.close();
-	std::cout << "Saved to JSON" << std::endl;
-
-}
-
-//Automatic saver, 15 second timer
-void TrackerModule::PeriodicSaver()
-{
-	std::thread periodicSave([this]()
-	{
-		while (m_IsRunning)
-		{
-			std::this_thread::sleep_for(std::chrono::seconds(15));
-			std::lock_guard<std::mutex> lock(m_TrackerMutex);
-			
-			SaveToJson();
-			ResetTimer();
-		}
-	});
-	periodicSave.detach();
-}
-
-void TrackerModule::WindowChanges()
-{
-	this->m_IsRunning = true;
-	this->m_PreviousWindow = GetForegroundWindow();
-	this->m_CurrentApplication = GetExecutableName();
-	this->m_StartTime = std::chrono::high_resolution_clock::now();
-
-	std::thread WindowChangeTrack([this]()
-	{
-		while (this->m_IsRunning)
-		{
-			this->m_ForegroundWindow = GetForegroundWindow();
-			if (this->m_ForegroundWindow != this->m_PreviousWindow && m_ForegroundWindow != nullptr)
-			{
-				std::string previousApp = m_CurrentApplication;
-				long duration = GetWindowDuration();
-				m_AppKey = GetExecutableName();
-
-				if (!previousApp.empty())
-				{
-					std::lock_guard<std::mutex> lock(m_TrackerMutex);
-					m_ApplicationList[previousApp] += duration;
-				}
-
-				Refresh();
-				SynchronizeWindows(this->m_ForegroundWindow);
-				ResetTimer();
-				SaveToJson();
-			}
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		}
-	});
-	WindowChangeTrack.detach();
-}
-//***************************
-//Timing 
-//***************************
-
+//--------------------
+// Time + Utility
+//--------------------
 std::string TrackerModule::Clock()
 {
 	auto todayDate = std::chrono::system_clock::now();
 	std::time_t now_c = std::chrono::system_clock::to_time_t(todayDate);
-
 	tm local_time_struct;
 	localtime_s(&local_time_struct, &now_c);
 
@@ -269,7 +138,6 @@ std::string TrackerModule::Clock()
 	return std::string(buffer);
 }
 
-//Resets the start time 
 void TrackerModule::ResetTimer()
 {
 	this->m_StartTime = std::chrono::high_resolution_clock::now();
@@ -277,10 +145,262 @@ void TrackerModule::ResetTimer()
 
 long TrackerModule::GetWindowDuration()
 {
-	auto endTime = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::seconds>(endTime - m_StartTime).count();
-	this->m_TotalDuration = duration;
-	return this->m_TotalDuration;
+	auto endTime = std::chrono::high_resolution_clock::now();;
+	return std::chrono::duration_cast<std::chrono::seconds>(endTime - m_StartTime).count();
+}
+
+long TrackerModule::GetTotalDailyTime()
+{
+	float totalTime = 0;
+	for (auto& [app, duration] : m_ApplicationTotals)
+		totalTime += duration;
+
+	return totalTime;
+}
+//--------------------
+// Json Handling
+//--------------------
+void TrackerModule::LoadFromJson()
+{
+	std::filesystem::path soluitionRoot = std::filesystem::current_path();
+	std::filesystem::path logDir = soluitionRoot / "Logs";
+	std::filesystem::path logPath = logDir / ("usage_" + Clock() + ".json");
+	m_LogPath = logPath.string();
+
+	if (!std::filesystem::exists(logPath))
+		return;
+
+	std::ifstream inFile(logPath);
+	nlohmann::json data;
+	try 
+	{ 
+		inFile >> data; 
+	} 
+	catch (...)
+	{
+		return;
+	}
+
+	for (auto& [app, obj] : data.items())
+	{
+		m_ApplicationTotals[app] = obj["Total Duration"].get<long>();
+	}
+}
+
+void TrackerModule::SaveToJson()
+{
+	if (m_IsSaving.exchange(true)) 
+		return; //Prevent concurrent saves
+	
+	std::map<std::string, long> snapshot;
+	{
+		std::lock_guard<std::mutex> lock(m_TrackerMutex);
+		snapshot = m_SessionDurations;
+	}
+
+	//Daily rollover handling
+	std::filesystem::path solutionRoot = std::filesystem::current_path();
+	std::filesystem::path logDir = solutionRoot / "Logs";
+	std::string currentDate = Clock();
+	std::filesystem::path newPath = logDir / ("usage_" + currentDate + ".json");
+
+	if (m_LogPath != newPath.string())
+	{
+		std::cout << "New day detected. Rolling over to. " << newPath << "\n";
+		m_LogPath = newPath.string();
+		LoadFromJson();
+	}
+
+	if (!std::filesystem::exists(logDir))
+		std::filesystem::create_directory(logDir);
+
+	//load old totals
+	nlohmann::json jsonData;
+	if (std::filesystem::exists(m_LogPath))
+	{
+		std::ifstream inFile(m_LogPath);
+		try
+		{
+			inFile >> jsonData;
+		}
+		catch (...)
+		{
+			jsonData = {};
+		}
+	}
+
+	//Merge snapshot into totals
+	{
+		for (const auto& [app, duration] : snapshot)
+		{
+			m_ApplicationTotals[app] += duration;
+			jsonData[app] = { {"Application", app}, {"Total Duration", m_ApplicationTotals[app]} };
+		}
+	}
+
+	//Write back
+	std::ofstream outFile(m_LogPath);
+	outFile << jsonData.dump(4);
+	outFile.close();
+
+	{
+		std::lock_guard<std::mutex> lock(m_TrackerMutex);
+		m_SessionDurations.clear();	
+	}
+	m_IsSaving = false;
+	//std::cout << "Saved to " << m_LogPath << "\n";
 }
 
 
+//--------------------
+// Threads
+//--------------------
+void TrackerModule::PeriodicSaver()
+{
+	std::thread saver([this]()
+	{
+		while (m_IsRunning)
+		{
+			std::this_thread::sleep_for(std::chrono::seconds(15));
+			SaveToJson();
+			ResetTimer();
+		}
+	});
+	saver.detach();
+}
+
+void TrackerModule::StartWorkerThread()
+{
+	m_IsRunning = true;
+	m_WorkerThread = std::thread([this]()
+	{
+		auto lastSaveTime = std::chrono::steady_clock::now();
+		auto lastDayCheck = std::chrono::system_clock::now();
+		auto currentDate = Clock();
+
+		m_PreviousWindow = GetForegroundWindow();
+		m_CurrentApplication = GetExecutableName();
+		ResetTimer();
+
+		while (m_IsRunning)
+		{
+			HWND newWindow = GetForegroundWindow(); 
+
+			if (newWindow != m_PreviousWindow && newWindow != nullptr)
+			{
+				std::lock_guard<std::mutex> lock(m_TrackerMutex);
+
+				long duration = GetWindowDuration();
+				m_ApplicationTotals[m_CurrentApplication] += duration;
+
+				Refresh();
+				SynchronizeWindows(newWindow);
+				ResetTimer();
+			}
+
+			
+			if (duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - lastSaveTime).count() >= 5)
+			{
+				SaveToJson();
+				lastSaveTime = std::chrono::steady_clock::now();
+			}
+			
+			if (Clock() != currentDate)
+			{
+				std::lock_guard<std::mutex> lock(m_TrackerMutex);
+				SaveToJson();
+				m_ApplicationTotals.clear();
+				currentDate = Clock();
+				std::cout << "New log day started: " << currentDate << std::endl;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		}
+	});
+	m_WorkerThread.detach();
+}
+
+//--------------------
+// Render Helpers
+//--------------------
+void TrackerModule::RenderTableToScreen()
+{
+	std::vector<std::pair<std::string, long>> sortedApps = ConvertMapToVector();
+
+	std::sort(sortedApps.begin(), sortedApps.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+
+	if (ImGui::BeginTable("Apps", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+	{
+		ImGui::TableSetupColumn("Application");
+		ImGui::TableSetupColumn("Duration (s)");
+		ImGui::TableHeadersRow();
+
+		for (const auto& [app, duration] : sortedApps)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::TextUnformatted(app.c_str());
+			ImGui::TableSetColumnIndex(1);
+			ImGui::Text("%ld", duration);
+			ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImVec4(0.1f, 0.1f, 0.1f, 0.5f)));
+
+		}
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+
+		ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImVec4(0.4f, 0.1f, 0.1f, 0.3f)));
+
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f)); //Bright Green
+		ImGui::TextUnformatted("Total Time (HH:MM:SS)");
+
+		ImGui::TableSetColumnIndex(1);
+		ImGui::TextUnformatted(FormatTime(GetTotalDailyTime()).c_str());
+		ImGui::PopStyleColor();
+		ImGui::EndTable();
+	}
+}
+
+void TrackerModule::RenderMenuBar()
+{
+	if (ImGui::BeginMenuBar())
+	{
+		if (ImGui::BeginMenu("File"))
+		{
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("View"))
+		{
+			ImGui::EndMenu();
+		}
+		
+		if (ImGui::BeginMenu("Settings"))
+		{
+			ImGui::EndMenu();
+	
+		}
+
+		ImGui::EndMenuBar();
+	}
+	
+	
+}
+//--------------------
+// Helpers
+//--------------------
+std::string TrackerModule::FormatTime(long seconds)
+{
+	int hours = seconds / 3600;
+	int minutes = (seconds % 3600) / 60;
+	int secs = seconds % 60;
+
+	char buffer[16];
+	snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", hours, minutes, secs);
+	return buffer;
+}
+
+std::vector<std::pair<std::string, long>> TrackerModule::ConvertMapToVector()
+{
+	std::lock_guard<std::mutex> lock(m_TrackerMutex);
+	std::vector<std::pair<std::string, long>> sortedApps(m_ApplicationTotals.begin(), m_ApplicationTotals.end());
+	return sortedApps;
+}
