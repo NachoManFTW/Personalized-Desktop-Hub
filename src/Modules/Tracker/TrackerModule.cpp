@@ -1,5 +1,6 @@
 #include "TrackerModule.h"
 #include "json.hpp"
+
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -31,7 +32,6 @@ void TrackerModule::Init()
 {
 	LoadFromJson();
 	StartWorkerThread();
-	//PeriodicSaver();
 }
 
 void TrackerModule::Update(float dt)
@@ -45,7 +45,7 @@ void TrackerModule::Render()
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.0f, 10.0f));
 	ImGui::Text(("Current Application: " + m_CurrentApplication).c_str());
 	RenderMenuBar();
-	RenderTableToScreen();
+	RenderTable();
 
 	ImGui::PopStyleVar();
 	ImGui::End();
@@ -53,10 +53,12 @@ void TrackerModule::Render()
 
 void TrackerModule::Shutdown()
 {
-	SaveToJson();
 	m_IsRunning = false;
+	if (m_WorkerThread.joinable())
+		m_WorkerThread.join();
 	//if (m_ProcessHandle)
 		//CloseHandle(m_ProcessHandle);
+	SaveToJson();
 }
 
 const char* TrackerModule::GetName() const
@@ -157,6 +159,8 @@ long TrackerModule::GetTotalDailyTime()
 
 	return totalTime;
 }
+
+
 //--------------------
 // Json Handling
 //--------------------
@@ -164,27 +168,48 @@ void TrackerModule::LoadFromJson()
 {
 	std::filesystem::path soluitionRoot = std::filesystem::current_path();
 	std::filesystem::path logDir = soluitionRoot / "Logs";
+
+	if (!std::filesystem::exists(logDir))
+		std::filesystem::create_directory(logDir);
+
 	std::filesystem::path logPath = logDir / ("usage_" + Clock() + ".json");
 	m_LogPath = logPath.string();
 
+	/*
 	if (!std::filesystem::exists(logPath))
+	{
+		std::cout << "Couldn't return file location\n";
 		return;
+	}
+	*/
+
+	nlohmann::json data;
+
+	if (!std::filesystem::exists(logDir))
+	{
+		std::ofstream createFile(logPath);
+		createFile << "{}";
+		createFile.close();
+		return;
+	}
 
 	std::ifstream inFile(logPath);
-	nlohmann::json data;
 	try 
 	{ 
 		inFile >> data; 
 	} 
-	catch (...)
+	catch (nlohmann::json::parse_error& e)
 	{
+		std::cerr << "JSON parse error: " << e.what() << "\n";
 		return;
 	}
 
 	for (auto& [app, obj] : data.items())
 	{
+		if (obj.contains("Total Duration"))
 		m_ApplicationTotals[app] = obj["Total Duration"].get<long>();
 	}
+	std::cout << "Loaded " << m_ApplicationTotals.size() << " entries from " << logPath << "\n";
 }
 
 void TrackerModule::SaveToJson()
@@ -214,7 +239,7 @@ void TrackerModule::SaveToJson()
 	if (!std::filesystem::exists(logDir))
 		std::filesystem::create_directory(logDir);
 
-	//load old totals
+	//Load old totals
 	nlohmann::json jsonData;
 	if (std::filesystem::exists(m_LogPath))
 	{
@@ -238,37 +263,27 @@ void TrackerModule::SaveToJson()
 		}
 	}
 
-	//Write back
-	std::ofstream outFile(m_LogPath);
-	outFile << jsonData.dump(4);
-	outFile.close();
+	//Save updated file
+	{
+		std::ofstream outFile(m_LogPath, std::ios::trunc);
+		outFile << jsonData.dump(4);
+		outFile.close();
+	}
 
+	//Reset session
 	{
 		std::lock_guard<std::mutex> lock(m_TrackerMutex);
 		m_SessionDurations.clear();	
 	}
+
 	m_IsSaving = false;
-	//std::cout << "Saved to " << m_LogPath << "\n";
+	std::cout << "Saved to " << m_LogPath << "\n";
 }
 
 
 //--------------------
 // Threads
 //--------------------
-void TrackerModule::PeriodicSaver()
-{
-	std::thread saver([this]()
-	{
-		while (m_IsRunning)
-		{
-			std::this_thread::sleep_for(std::chrono::seconds(15));
-			SaveToJson();
-			ResetTimer();
-		}
-	});
-	saver.detach();
-}
-
 void TrackerModule::StartWorkerThread()
 {
 	m_IsRunning = true;
@@ -284,17 +299,17 @@ void TrackerModule::StartWorkerThread()
 
 		while (m_IsRunning)
 		{
-			HWND newWindow = GetForegroundWindow(); 
+			m_ForegroundWindow = GetForegroundWindow(); 
 
-			if (newWindow != m_PreviousWindow && newWindow != nullptr)
+			if (m_ForegroundWindow != m_PreviousWindow && m_ForegroundWindow != nullptr)
 			{
 				std::lock_guard<std::mutex> lock(m_TrackerMutex);
 
 				long duration = GetWindowDuration();
-				m_ApplicationTotals[m_CurrentApplication] += duration;
-
+				m_SessionDurations[m_CurrentApplication] += duration;
+				
 				Refresh();
-				SynchronizeWindows(newWindow);
+				SynchronizeWindows(m_ForegroundWindow);
 				ResetTimer();
 			}
 
@@ -319,10 +334,11 @@ void TrackerModule::StartWorkerThread()
 	m_WorkerThread.detach();
 }
 
+
 //--------------------
 // Render Helpers
 //--------------------
-void TrackerModule::RenderTableToScreen()
+void TrackerModule::RenderTable()
 {
 	std::vector<std::pair<std::string, long>> sortedApps = ConvertMapToVector();
 
@@ -384,6 +400,8 @@ void TrackerModule::RenderMenuBar()
 	
 	
 }
+
+
 //--------------------
 // Helpers
 //--------------------

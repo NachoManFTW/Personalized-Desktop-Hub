@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/IModule.h"
-#include <imgui.h>
+#include "imgui.h"
+
 #include <string>
 #include <map>
 #include <chrono>
@@ -83,7 +84,6 @@ private:
 	//Logging
 	void LoadFromJson();
 	void SaveToJson();
-	void PeriodicSaver();
 
 	//Threads
 	void StartWorkerThread();
@@ -93,7 +93,7 @@ private:
 	std::vector<std::pair<std::string, long>> ConvertMapToVector();
 
 	//Render Helpers
-	void RenderTableToScreen();
+	void RenderTable();
 	void RenderMenuBar();
 };
 

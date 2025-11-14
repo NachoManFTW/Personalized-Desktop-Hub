@@ -1,5 +1,9 @@
+//Declaration
 #include "Application.h"
 
+
+
+//Inlcudes
 #include <imgui.h>
 #include <iostream>
 #include <stdexcept>
@@ -20,29 +24,53 @@ Application::~Application()
 
 }
 
-//Run initialze functions on all modules
-void Application::RunInit()
+//--------------------
+// Application Lifecycle
+//--------------------
+void Application::Run()
+{
+    ModuleInit();
+
+    while (!m_Window.ShouldClose()) 
+    {
+        m_Window.PollEvents();
+
+        ClearScreen();
+
+        m_ImGui.Begin();
+        {
+            ModuleRender();
+
+        }
+        m_ImGui.End();
+        m_Window.SwapBuffers();
+    }
+
+    ModuleShutdown();
+}
+
+void Application::Shutdown()
+{
+
+}
+
+
+//--------------------
+// Module Lifecycle
+//--------------------
+void Application::ModuleInit()
 {
     for (auto& module : m_Modules)
         module->Init();
 }
-//Run update functions on all modules
 
-void Application::RunUpdate(float dt)
+void Application::ModuleUpdate(float dt)
 {
     for (auto& module : m_Modules)
         module->Update(dt); 
 }
-//Run shutdown functions on all modules
 
-void Application::RunShutdown()
-{
-    for (auto& module : m_Modules)
-        module->Shutdown();
-}
-
-//Ability to toggle view of all functions
-void Application::ToggleModules()
+void Application::ModuleRender()
 {
     static std::unordered_map<std::string, bool> visibility;
     ImGui::Begin("Modules");
@@ -62,6 +90,14 @@ void Application::ToggleModules()
     ImGui::End();
 }
 
+void Application::ModuleShutdown()
+{
+    for (auto& module : m_Modules)
+        module->Shutdown();
+}
+
+
+
 void Application::ClearScreen()
 {
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -69,28 +105,7 @@ void Application::ClearScreen()
 }
 
 
-void Application::Run() 
-{
 
-    RunInit();
-
-
-    while (!m_Window.ShouldClose()) {
-        m_Window.PollEvents();
-
-        ClearScreen();
-       
-        m_ImGui.Begin();
-        {
-            ToggleModules();
-
-        }
-        m_ImGui.End();
-        m_Window.SwapBuffers();
-    }
-
-    RunShutdown();
-}
 
 
 

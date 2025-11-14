@@ -14,17 +14,22 @@ private:
     ImGuiLayer m_ImGui;
     std::vector<std::shared_ptr<IModule>> m_Modules;
     
-    void RunInit();
-    void RunUpdate(float dt);
-    void RunShutdown();
-    void ToggleModules();
+    void ModuleInit();
+    void ModuleUpdate(float dt);
+    void ModuleRender();
+    void ModuleShutdown();
+
     void ClearScreen();
+
+
+
 
 public:
     Application(int width, int height, const char* title);
     ~Application();
 
     void Run();
+    void Shutdown();
 
     template<typename T, typename... Args>
     void AddModule(Args&&... args)

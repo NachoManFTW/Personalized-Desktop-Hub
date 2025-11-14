@@ -11,4 +11,9 @@ public:
     void Begin();
     void End();
 
+    //Window Events
+    void DraggableWindow();
+
+    //Rendering
+    void RenderMainMenubar();
 };

@@ -1,10 +1,10 @@
 #include "Core/Application.h"
+
+//Modules
 #include "Modules/Tracker/TrackerModule.h"
 #include "Modules/Console/ConsoleModule.h"
 #include "Modules/FileExplorer/FileExplorerModule.h"
-#include <memory>
-#include <iostream>
-
+#include "Modules/VirtualMemoryMap/VirtualMemoryMapModule.h"
 
 int main() 
 {
@@ -13,7 +13,8 @@ int main()
     app.AddModule<TrackerModule>();
     app.AddModule<FileExplorerModule>();
     app.AddModule<ConsoleModule>();
-    app.Run();
-    return 0;
+    app.AddModule<VirtualMemoryMapModule>();
 
+    app.Run();
+    app.Shutdown();
 }
